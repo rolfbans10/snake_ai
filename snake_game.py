@@ -8,9 +8,6 @@ WINDOW_HEIGHT = 480
 FPS = 10
 CELL_SIZE = 20
 
-# staarting direction
-direction = (CELL_SIZE, 0)
-
 
 def move_snake(snake, direction, food):
     head_x, head_y = snake[0]
@@ -41,13 +38,34 @@ def place_food():
         random.randint(0, (WINDOW_HEIGHT - CELL_SIZE) // CELL_SIZE) * CELL_SIZE
     )
 
-snake = [
-    (100, 100),
-    (80, 100),
-    (60, 100)
-]
+def check_collision(snake):
+    head = snake[0]
 
-food = place_food()
+    # Wall collision
+    if (
+        head[0] < 0 or head[0] >= WINDOW_WIDTH or
+        head[1] < 0 or head[1] >= WINDOW_HEIGHT
+    ):
+        return True
+
+    # Self collision
+    if head in snake[1:]:
+        return True
+
+    return False
+
+def reset_game():
+    global snake, direction, food, score
+    snake = [
+        (100, 100),
+        (80, 100),
+        (60, 100)
+    ]
+    direction = (CELL_SIZE, 0)
+    food = place_food()
+    score = 0
+
+
 
 
 #initialize pygame
@@ -55,7 +73,22 @@ pygame.init()
 window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 pygame.display.set_caption("Snake Game")
 clock = pygame.time.Clock()
+font = pygame.font.SysFont("Arial", 24)
 
+
+
+# staarting direction
+direction = (CELL_SIZE, 0)
+
+food = place_food()
+
+snake = [
+    (100, 100),
+    (80, 100),
+    (60, 100)
+]
+
+score = 0
 
 #main game loop
 while True:
@@ -68,6 +101,11 @@ while True:
     ate_food = move_snake(snake, direction, food)
     if ate_food:
         food = place_food()
+        score += 1
+
+    # Check for collisions
+    if check_collision(snake):
+        reset_game()
 
     #draw the game
     window.fill((0, 0, 0))
@@ -79,6 +117,10 @@ while True:
 
     # draw the food
     pygame.draw.rect(window, (255,0,0), (*food, CELL_SIZE, CELL_SIZE))
+
+    # draw the score
+    score_text = font.render(f"Score: {score}", True, (255, 255, 255))
+    window.blit(score_text, (10, 10))
 
     pygame.display.flip()
     clock.tick(FPS)
