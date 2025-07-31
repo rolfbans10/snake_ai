@@ -2,125 +2,208 @@ import pygame
 import sys
 import random
 
-# Constants
-WINDOW_WIDTH = 640
-WINDOW_HEIGHT = 480
-FPS = 10
-CELL_SIZE = 20
-
-
-def move_snake(snake, direction, food):
-    head_x, head_y = snake[0]
-    d_x, d_y = direction
-    new_head = (head_x + d_x, head_y + d_y)
-    snake.insert(0, new_head)
-    if new_head == food:
-        return True
-    else:
-        snake.pop()
+class SnakeGame:
+    def __init__(self, width=640, height=480, cell_size=20, fps=10):
+        # Game constants
+        self.WINDOW_WIDTH = width
+        self.WINDOW_HEIGHT = height
+        self.CELL_SIZE = cell_size
+        self.FPS = fps
+        
+        # Game state
+        self.snake = None
+        self.food = None
+        self.direction = None
+        self.score = 0
+        self.game_over = False
+        
+        # Pygame setup (optional for rendering)
+        self.window = None
+        self.clock = None
+        self.font = None
+        self.rendering = False
+        
+        # Initialize game
+        self.reset()
+    
+    def init_pygame(self):
+        """Initialize pygame for rendering"""
+        if not self.rendering:
+            pygame.init()
+            self.window = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT))
+            pygame.display.set_caption("Snake Game")
+            self.clock = pygame.time.Clock()
+            self.font = pygame.font.SysFont("Arial", 24)
+            self.rendering = True
+    
+    def reset(self):
+        """Reset the game to initial state"""
+        self.snake = [
+            (100, 100),
+            (80, 100),
+            (60, 100)
+        ]
+        self.direction = (self.CELL_SIZE, 0)  # Moving right
+        self.food = self._place_food()
+        self.score = 0
+        self.game_over = False
+    
+    def _place_food(self):
+        """Place food at a random location"""
+        while True:
+            food_pos = (
+                random.randint(0, (self.WINDOW_WIDTH - self.CELL_SIZE) // self.CELL_SIZE) * self.CELL_SIZE,
+                random.randint(0, (self.WINDOW_HEIGHT - self.CELL_SIZE) // self.CELL_SIZE) * self.CELL_SIZE
+            )
+            # Make sure food doesn't spawn on snake
+            if food_pos not in self.snake:
+                return food_pos
+    
+    def _move_snake(self):
+        """Move the snake in current direction"""
+        head_x, head_y = self.snake[0]
+        d_x, d_y = self.direction
+        new_head = (head_x + d_x, head_y + d_y)
+        self.snake.insert(0, new_head)
+        
+        # Check if food eaten
+        if new_head == self.food:
+            self.score += 1
+            self.food = self._place_food()
+            return True
+        else:
+            self.snake.pop()
+            return False
+    
+    def _check_collision(self):
+        """Check for wall or self collision"""
+        head = self.snake[0]
+        
+        # Wall collision
+        if (head[0] < 0 or head[0] >= self.WINDOW_WIDTH or
+            head[1] < 0 or head[1] >= self.WINDOW_HEIGHT):
+            return True
+        
+        # Self collision
+        if head in self.snake[1:]:
+            return True
+        
         return False
-
-def handle_input(current_direction):
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_UP] and current_direction != (0, CELL_SIZE):
-        return (0, -CELL_SIZE)
-    elif keys[pygame.K_DOWN] and current_direction != (0, -CELL_SIZE):
-        return (0, CELL_SIZE)
-    elif keys[pygame.K_LEFT] and current_direction != (CELL_SIZE, 0):
-        return (-CELL_SIZE, 0)
-    elif keys[pygame.K_RIGHT] and current_direction != (-CELL_SIZE, 0):
-       return (CELL_SIZE, 0)
-    return current_direction
-
-def place_food():
-    return (
-        random.randint(0, (WINDOW_WIDTH - CELL_SIZE) // CELL_SIZE) * CELL_SIZE,
-        random.randint(0, (WINDOW_HEIGHT - CELL_SIZE) // CELL_SIZE) * CELL_SIZE
-    )
-
-def check_collision(snake):
-    head = snake[0]
-
-    # Wall collision
-    if (
-        head[0] < 0 or head[0] >= WINDOW_WIDTH or
-        head[1] < 0 or head[1] >= WINDOW_HEIGHT
-    ):
-        return True
-
-    # Self collision
-    if head in snake[1:]:
-        return True
-
-    return False
-
-def reset_game():
-    global snake, direction, food, score
-    snake = [
-        (100, 100),
-        (80, 100),
-        (60, 100)
-    ]
-    direction = (CELL_SIZE, 0)
-    food = place_food()
-    score = 0
-
-
-
-
-#initialize pygame
-pygame.init()
-window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-pygame.display.set_caption("Snake Game")
-clock = pygame.time.Clock()
-font = pygame.font.SysFont("Arial", 24)
-
-
-
-# staarting direction
-direction = (CELL_SIZE, 0)
-
-food = place_food()
-
-snake = [
-    (100, 100),
-    (80, 100),
-    (60, 100)
-]
-
-score = 0
-
-#main game loop
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
+    
+    def step(self, action=None):
+        """
+        Take one game step
+        action: 0=up, 1=right, 2=down, 3=left, None=continue current direction
+        """
+        if self.game_over:
+            return
+        
+        # Update direction based on action
+        if action is not None:
+            self._set_direction_from_action(action)
+        
+        # Move snake
+        self._move_snake()
+        
+        # Check collision
+        if self._check_collision():
+            self.game_over = True
+    
+    def _set_direction_from_action(self, action):
+        """Convert action to direction, preventing reverse moves"""
+        current_dir = self.direction
+        
+        if action == 0:  # Up
+            new_dir = (0, -self.CELL_SIZE)
+        elif action == 1:  # Right
+            new_dir = (self.CELL_SIZE, 0)
+        elif action == 2:  # Down
+            new_dir = (0, self.CELL_SIZE)
+        elif action == 3:  # Left
+            new_dir = (-self.CELL_SIZE, 0)
+        else:
+            return  # Invalid action, keep current direction
+        
+        # Prevent snake from reversing into itself
+        if new_dir != (-current_dir[0], -current_dir[1]):
+            self.direction = new_dir
+    
+    def handle_pygame_input(self):
+        """Handle pygame keyboard input"""
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_UP] and self.direction != (0, self.CELL_SIZE):
+            self.direction = (0, -self.CELL_SIZE)
+        elif keys[pygame.K_DOWN] and self.direction != (0, -self.CELL_SIZE):
+            self.direction = (0, self.CELL_SIZE)
+        elif keys[pygame.K_LEFT] and self.direction != (self.CELL_SIZE, 0):
+            self.direction = (-self.CELL_SIZE, 0)
+        elif keys[pygame.K_RIGHT] and self.direction != (-self.CELL_SIZE, 0):
+            self.direction = (self.CELL_SIZE, 0)
+    
+    def get_state(self):
+        """Get current game state"""
+        return {
+            'snake': self.snake.copy(),
+            'food': self.food,
+            'direction': self.direction,
+            'score': self.score,
+            'game_over': self.game_over
+        }
+    
+    def render(self):
+        """Render the game using pygame"""
+        if not self.rendering:
+            self.init_pygame()
+        
+        # Handle pygame events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        
+        # Clear screen
+        self.window.fill((0, 0, 0))
+        
+        # Draw snake
+        for segment in self.snake:
+            pygame.draw.rect(self.window, (0, 255, 0), (*segment, self.CELL_SIZE, self.CELL_SIZE))
+        
+        # Draw food
+        pygame.draw.rect(self.window, (255, 0, 0), (*self.food, self.CELL_SIZE, self.CELL_SIZE))
+        
+        # Draw score
+        score_text = self.font.render(f"Score: {self.score}", True, (255, 255, 255))
+        self.window.blit(score_text, (10, 10))
+        
+        # Draw game over message
+        if self.game_over:
+            game_over_text = self.font.render("Game Over! Press R to restart", True, (255, 255, 255))
+            text_rect = game_over_text.get_rect(center=(self.WINDOW_WIDTH//2, self.WINDOW_HEIGHT//2))
+            self.window.blit(game_over_text, text_rect)
+        
+        pygame.display.flip()
+        self.clock.tick(self.FPS)
+    
+    def close(self):
+        """Clean up pygame"""
+        if self.rendering:
             pygame.quit()
-            sys.exit()
 
-    direction = handle_input(direction)
-    ate_food = move_snake(snake, direction, food)
-    if ate_food:
-        food = place_food()
-        score += 1
+def play_human():
+    """Play the game with human keyboard input"""
+    game = SnakeGame()
+    
+    while True:
+        game.render()
+        
+        if not game.game_over:
+            game.handle_pygame_input()
+            game.step()
+        else:
+            # Check for restart
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_r]:
+                game.reset()
 
-    # Check for collisions
-    if check_collision(snake):
-        reset_game()
-
-    #draw the game
-    window.fill((0, 0, 0))
-
-
-    #draw the snake
-    for segment in snake:
-        pygame.draw.rect(window, (0, 255, 0), (*segment, CELL_SIZE, CELL_SIZE))
-
-    # draw the food
-    pygame.draw.rect(window, (255,0,0), (*food, CELL_SIZE, CELL_SIZE))
-
-    # draw the score
-    score_text = font.render(f"Score: {score}", True, (255, 255, 255))
-    window.blit(score_text, (10, 10))
-
-    pygame.display.flip()
-    clock.tick(FPS)
+if __name__ == "__main__":
+    play_human()
