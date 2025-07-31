@@ -8,6 +8,15 @@ class SnakeEnvironment(SnakeGame, gym.Env):
     AI-Ready Snake Environment that extends SnakeGame and implements OpenAI Gym interface
     """
     
+    # 🎯 CONFIGURABLE REWARD SYSTEM
+    DEATH_PENALTY = -100        # Penalty for dying
+    FOOD_REWARD = 150          # Reward for eating food  
+    STEP_PENALTY = -1      # Small penalty each step
+    HUNGER_MAX = 20          # Max steps before hunger penalty maxes out
+    DISTANCE_REWARD = 5     # Reward for moving closer to food
+    DISTANCE_PENALTY = -10   # Penalty for moving away from food
+    MAX_STARVATION_STEPS = 100  # Force death after this many steps without food
+    
     def __init__(self):
         # Call the parent class constructor
         super().__init__()
@@ -32,9 +41,15 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         super().reset()  # Use parent's reset method
         self.prev_score = 0
         
+        # HUNGER SYSTEM: Track steps since last food
+        self.steps_since_food = 0
+        
+        # DISTANCE TRACKING: Track distance to food for directional rewards
+        self.prev_distance_to_food = None
+        
         # Return observation and info (gym format)
         observation = self.get_state_array()
-        info = {'score': self.score}
+        info = {'score': self.score, 'hunger': self.steps_since_food}
         return observation, info
     
     def step(self, action):
@@ -45,31 +60,95 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         # Use parent's step method
         super().step(action)
         
-        # STEP 1, 2 & 3: Calculate reward based on what happened
+        # HUNGER SYSTEM: Calculate reward with starvation pressure
         reward = 0
         
-        # STEP 3: Step penalty - small cost for each move (encourages efficiency)
-        reward -= 0.1
+        # Increment hunger counter
+        self.steps_since_food += 1
         
         # STEP 2: Food reward - check if score increased (ate food)
+        ate_food = False
         if hasattr(self, 'prev_score'):
             if self.score > self.prev_score:
-                reward += 10
+                reward += self.FOOD_REWARD
+                ate_food = True
+                # RESET HUNGER when food is eaten!
+                self.steps_since_food = 0
+                print(f"    🍎 FOOD FOUND! Hunger reset. +{self.FOOD_REWARD} reward")
         
         # Store current score for next time
         self.prev_score = self.score
         
-        # STEP 1: Death penalty - overrides everything if we died
+        # STEP 3: DISTANCE REWARD - encourage moving toward food
+        distance_reward = self._calculate_distance_reward()
+        reward += distance_reward
+        
+        # STEP 4: STEP PENALTY - small penalty for each step to encourage efficiency
+        reward += self.STEP_PENALTY
+        
+        # STEP 5: HUNGER PENALTY - grows over time without food
+        if not ate_food:
+            # Progressive hunger penalty that gets worse over time
+            hunger_penalty = (self.steps_since_food / self.HUNGER_MAX) ** 2
+            reward -= hunger_penalty
+            
+            # Show hunger status occasionally
+            if self.steps_since_food % 25 == 0:
+                print(f"    😰 HUNGER: {self.steps_since_food} steps, penalty: -{hunger_penalty:.2f}")
+        
+        # STEP 6: STARVATION DEATH - force death if too many steps without food
+        if self.steps_since_food >= self.MAX_STARVATION_STEPS:
+            self.game_over = True  # Force death due to starvation
+            print(f"    💀 STARVED TO DEATH! {self.steps_since_food} steps without food!")
+        
+        # STEP 7: Death penalty - overrides everything if we died
         if self.game_over:
-            reward = -10  # Override any other rewards if we died
+            reward = self.DEATH_PENALTY  # Override any other rewards if we died
+            print(f"    💀 DEATH + STARVATION: {self.DEATH_PENALTY + (self.steps_since_food/10):.1f}")
         
         # Return in gym format: obs, reward, terminated, truncated, info
         observation = self.get_state_array()
         terminated = self.game_over  # Game ends when snake dies
         truncated = False  # We don't truncate episodes
-        info = {'score': self.score}
+        info = {
+            'score': self.score, 
+            'hunger': self.steps_since_food,
+            'hunger_penalty': (self.steps_since_food / self.HUNGER_MAX) ** 2 if not ate_food else 0,
+            'starved_to_death': self.steps_since_food >= self.MAX_STARVATION_STEPS if self.game_over else False
+        }
         
         return observation, reward, terminated, truncated, info
+    
+    def _calculate_distance_reward(self):
+        """
+        Calculate reward based on distance to food
+        +DISTANCE_REWARD for each step closer, +DISTANCE_PENALTY for each step farther
+        """
+        # Get current distance to food (Manhattan distance)
+        head_x, head_y = self.snake[0]
+        food_x, food_y = self.food
+        current_distance = abs(head_x - food_x) + abs(head_y - food_y)
+        
+        # If this is the first step, just store distance
+        if self.prev_distance_to_food is None:
+            self.prev_distance_to_food = current_distance  
+            return 0.0
+        
+        # Calculate distance change
+        distance_change = self.prev_distance_to_food - current_distance
+        
+        # Reward based on getting closer/farther
+        if distance_change > 0:  # Got closer
+            distance_reward = distance_change * self.DISTANCE_REWARD
+        elif distance_change < 0:  # Got farther  
+            distance_reward = distance_change * self.DISTANCE_PENALTY  # This will be negative
+        else:  # Same distance
+            distance_reward = 0.0
+        
+        # Update for next step
+        self.prev_distance_to_food = current_distance
+        
+        return distance_reward
     
     def get_state_array(self):
         """
