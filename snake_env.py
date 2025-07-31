@@ -1,21 +1,41 @@
 from snake_game import SnakeGame
 import numpy as np
+import gymnasium as gym
+from gymnasium import spaces
 
-class SnakeEnvironment(SnakeGame):
+class SnakeEnvironment(SnakeGame, gym.Env):
     """
-    Step 1: Create a basic training environment that extends SnakeGame
+    AI-Ready Snake Environment that extends SnakeGame and implements OpenAI Gym interface
     """
     
     def __init__(self):
         # Call the parent class constructor
         super().__init__()
+        
+        # Define action and observation spaces for AI training
+        self.action_space = spaces.Discrete(4)  # 4 actions: up, right, down, left
+        
+        # Observation space: flattened 24x32 grid = 768 values, each between -1 and 1
+        self.observation_space = spaces.Box(
+            low=-1.0, 
+            high=1.0, 
+            shape=(768,),  # 24 * 32 = 768
+            dtype=np.float32
+        )
+        
+        print(f"🤖 AI Environment created!")
+        print(f"   Action space: {self.action_space}")
+        print(f"   Observation space: {self.observation_space}")
     
-    def reset(self):
-        """Reset the game and return the initial state"""
+    def reset(self, seed=None):
+        """Reset environment for AI training"""
         super().reset()  # Use parent's reset method
-        # Initialize score tracking for food rewards
         self.prev_score = 0
-        return self.get_state()
+        
+        # Return observation and info (gym format)
+        observation = self.get_state_array()
+        info = {'score': self.score}
+        return observation, info
     
     def step(self, action):
         """
@@ -35,7 +55,6 @@ class SnakeEnvironment(SnakeGame):
         if hasattr(self, 'prev_score'):
             if self.score > self.prev_score:
                 reward += 10
-                print(f"    🍎 FOOD REWARD: +10 (ate food! Score: {self.score})")
         
         # Store current score for next time
         self.prev_score = self.score
@@ -43,14 +62,14 @@ class SnakeEnvironment(SnakeGame):
         # STEP 1: Death penalty - overrides everything if we died
         if self.game_over:
             reward = -10  # Override any other rewards if we died
-            print(f"    💀 DEATH PENALTY: -10 (snake died!)")
         
-        # Return the basic information an AI needs:
-        state = self.get_state()
-        done = self.game_over
+        # Return in gym format: obs, reward, terminated, truncated, info
+        observation = self.get_state_array()
+        terminated = self.game_over  # Game ends when snake dies
+        truncated = False  # We don't truncate episodes
         info = {'score': self.score}
         
-        return state, reward, done, info
+        return observation, reward, terminated, truncated, info
     
     def get_state_array(self):
         """
@@ -64,12 +83,11 @@ class SnakeEnvironment(SnakeGame):
         # Calculate grid dimensions (divide screen by cell size)
         grid_height = self.WINDOW_HEIGHT // self.CELL_SIZE  # 480 // 20 = 24
         grid_width = self.WINDOW_WIDTH // self.CELL_SIZE    # 640 // 20 = 32
-        print(f"    🔢 Creating {grid_height}x{grid_width} grid...")
         
         # Create empty grid filled with zeros
-        grid = np.zeros((grid_height, grid_width))
+        grid = np.zeros((grid_height, grid_width), dtype=np.float32)
         
-        # STEP 2A: Mark snake positions
+        # Mark snake positions
         for i, segment in enumerate(self.snake):
             # Convert pixel coordinates to grid coordinates
             x, y = segment[0] // self.CELL_SIZE, segment[1] // self.CELL_SIZE
@@ -77,49 +95,42 @@ class SnakeEnvironment(SnakeGame):
             # Make sure coordinates are within grid bounds
             if 0 <= x < grid_width and 0 <= y < grid_height:
                 if i == 0:
-                    grid[y, x] = 1    # Head = 1
-                    print(f"    🐍 Snake head at grid ({x}, {y})")
+                    grid[y, x] = 1.0    # Head = 1
                 else:
-                    grid[y, x] = 0.5  # Body = 0.5
+                    grid[y, x] = 0.5    # Body = 0.5
         
-        # STEP 2B: Mark food position  
+        # Mark food position  
         food_x, food_y = self.food[0] // self.CELL_SIZE, self.food[1] // self.CELL_SIZE
         if 0 <= food_x < grid_width and 0 <= food_y < grid_height:
-            grid[food_y, food_x] = -1  # Food = -1
-            print(f"    🍎 Food at grid ({food_x}, {food_y})")
+            grid[food_y, food_x] = -1.0  # Food = -1
         
-        # STEP 2C: Flatten to 1D array (AI networks expect 1D input)
-        flattened = grid.flatten()
-        print(f"    📊 Grid flattened to {len(flattened)} numbers")
-        
-        return flattened
+        # Flatten to 1D array (AI networks expect 1D input)
+        return grid.flatten()
 
 # Test our basic environment
 if __name__ == "__main__":
     env = SnakeEnvironment()
     
-    print("Testing NumPy array conversion...")
+    print("Testing AI-ready environment...")
     
-    # Reset and get initial state
-    dict_state = env.reset()
-    print(f"📝 Dictionary state keys: {dict_state.keys()}")
+    # Test the gym-compatible interface
+    obs, info = env.reset()
+    print(f"✅ Reset successful!")
+    print(f"   Observation shape: {obs.shape}")
+    print(f"   Observation type: {type(obs)}")
+    print(f"   Info: {info}")
     
-    # Test our new NumPy conversion
-    print("\n🔢 CONVERTING TO NUMPY ARRAY:")
-    array_state = env.get_state_array()
+    # Test a few actions
+    print(f"\n🎮 Testing actions...")
+    for i in range(3):
+        action = env.action_space.sample()  # Random action
+        obs, reward, terminated, truncated, info = env.step(action)
+        action_names = ['UP', 'RIGHT', 'DOWN', 'LEFT']
+        print(f"   Step {i+1}: {action_names[action]} → Reward: {reward}, Score: {info['score']}")
+        
+        if terminated:
+            print("   🎯 Game over!")
+            break
     
-    print(f"\n📊 NUMPY ARRAY INFO:")
-    print(f"   Shape: {array_state.shape}")
-    print(f"   Type: {type(array_state)}")
-    print(f"   Min value: {array_state.min()}")
-    print(f"   Max value: {array_state.max()}")
-    print(f"   Unique values: {np.unique(array_state)}")
-    
-    # Show a small sample of the array
-    print(f"\n🔍 FIRST 20 VALUES:")
-    print(f"   {array_state[:20]}")
-    
-    print(f"\n🧮 COMPARISON:")
-    print(f"   Dictionary state: Complex objects (lists, tuples)")
-    print(f"   NumPy array: {len(array_state)} simple numbers")
-    print(f"   Perfect for AI neural networks! 🧠")
+    print(f"\n🧠 ENVIRONMENT READY FOR AI TRAINING!")
+    print(f"   Run 'python train_ai.py' to start training! 🚀")
