@@ -2,20 +2,26 @@ from snake_game import SnakeGame
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+import random
 
 class SnakeEnvironment(SnakeGame, gym.Env):
     """
     AI-Ready Snake Environment that extends SnakeGame and implements OpenAI Gym interface
     """
     
-    # 🎯 CONFIGURABLE REWARD SYSTEM
-    DEATH_PENALTY = -100        # Penalty for dying
-    FOOD_REWARD = 150          # Reward for eating food  
-    STEP_PENALTY = -1      # Small penalty each step
-    HUNGER_MAX = 20          # Max steps before hunger penalty maxes out
-    DISTANCE_REWARD = 5     # Reward for moving closer to food
-    DISTANCE_PENALTY = -10   # Penalty for moving away from food
-    MAX_STARVATION_STEPS = 100  # Force death after this many steps without food
+    # 🎯 CURRICULUM LEARNING REWARD SYSTEM (Progressive Difficulty)
+    DEATH_PENALTY = -200        # Strong penalty for dying (avoid death at all costs)
+    FOOD_REWARD = 100          # Good reward for eating food (main objective)  
+    STEP_PENALTY = -0.05       # Even smaller step penalty (more exploration time)
+    HUNGER_MAX = 75           # Slower hunger buildup (more time to learn)
+    DISTANCE_REWARD = 2.0     # Stronger guidance toward food
+    DISTANCE_PENALTY = -2.0   # Stronger penalty for moving away
+    MAX_STARVATION_STEPS = 250  # More generous starvation limit (learning time)
+    
+    # 🎓 CURRICULUM LEARNING: Dynamic Food Count
+    INITIAL_FOODS = 10         # Start with many foods (easy)
+    FINAL_FOODS = 1           # End with single food (hard)
+    TOTAL_TRAINING_STEPS = 2500000  # Total training timesteps
     
     def __init__(self):
         # Call the parent class constructor
@@ -32,9 +38,15 @@ class SnakeEnvironment(SnakeGame, gym.Env):
             dtype=np.float32
         )
         
+        # 🎓 CURRICULUM LEARNING: Track training progress
+        self.global_step_count = 0
+        self.foods = []  # Initialize empty foods list
+        self._last_food_count = self.INITIAL_FOODS  # Track food count changes
+        
         print(f"🤖 AI Environment created!")
         print(f"   Action space: {self.action_space}")
         print(f"   Observation space: {self.observation_space}")
+        print(f"🎓 Curriculum Learning: {self.INITIAL_FOODS} → {self.FINAL_FOODS} foods over {self.TOTAL_TRAINING_STEPS:,} steps")
     
     def reset(self, seed=None):
         """Reset environment for AI training"""
@@ -47,6 +59,9 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         # DISTANCE TRACKING: Track distance to food for directional rewards
         self.prev_distance_to_food = None
         
+        # MULTI-FOOD SYSTEM: Override single food with multiple foods
+        self._place_multiple_foods()
+        
         # Return observation and info (gym format)
         observation = self.get_state_array()
         info = {'score': self.score, 'hunger': self.steps_since_food}
@@ -57,6 +72,9 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         Take one step in the environment
         action: 0=up, 1=right, 2=down, 3=left
         """
+        # 🎓 CURRICULUM LEARNING: Update step counter
+        self._update_step_counter()
+        
         # Use parent's step method
         super().step(action)
         
@@ -119,15 +137,44 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         
         return observation, reward, terminated, truncated, info
     
+    def _get_current_food_count(self):
+        """
+        Calculate current number of foods based on training progress (curriculum learning)
+        Start with INITIAL_FOODS, gradually reduce to FINAL_FOODS
+        """
+        # Handle case where global_step_count not initialized yet (during __init__)
+        if not hasattr(self, 'global_step_count'):
+            return self.INITIAL_FOODS
+            
+        if self.global_step_count >= self.TOTAL_TRAINING_STEPS:
+            return self.FINAL_FOODS
+        
+        # Calculate progress as percentage (0.0 to 1.0)
+        progress = self.global_step_count / self.TOTAL_TRAINING_STEPS
+        
+        # Linear interpolation from INITIAL_FOODS to FINAL_FOODS
+        current_foods = self.INITIAL_FOODS - int(progress * (self.INITIAL_FOODS - self.FINAL_FOODS))
+        
+        # Ensure we stay within bounds
+        return max(self.FINAL_FOODS, min(self.INITIAL_FOODS, current_foods))
+    
+    def _update_step_counter(self):
+        """Update global step counter for curriculum learning"""
+        self.global_step_count += 1
+        
+        # Log curriculum progress every 250k steps (10% of 2.5M)
+        if self.global_step_count % 250000 == 0:
+            current_foods = self._get_current_food_count()
+            progress_pct = (self.global_step_count / self.TOTAL_TRAINING_STEPS) * 100
+            print(f"🎓 CURRICULUM UPDATE: Step {self.global_step_count:,} ({progress_pct:.0f}%) - Now using {current_foods} foods")
+    
     def _calculate_distance_reward(self):
         """
-        Calculate reward based on distance to food
+        Calculate reward based on distance to nearest food
         +DISTANCE_REWARD for each step closer, +DISTANCE_PENALTY for each step farther
         """
-        # Get current distance to food (Manhattan distance)
-        head_x, head_y = self.snake[0]
-        food_x, food_y = self.food
-        current_distance = abs(head_x - food_x) + abs(head_y - food_y)
+        # Get current distance to nearest food (Manhattan distance)
+        current_distance = self._get_nearest_food_distance()
         
         # If this is the first step, just store distance
         if self.prev_distance_to_food is None:
@@ -149,6 +196,81 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         self.prev_distance_to_food = current_distance
         
         return distance_reward
+    
+    def _place_multiple_foods(self):
+        """Place multiple food items on the board (curriculum learning - dynamic count)"""
+        # 🎓 Get current food count based on training progress
+        target_food_count = self._get_current_food_count()
+        
+        self.foods = []  # List of food positions
+        for _ in range(target_food_count):
+            food_pos = self._place_single_food()
+            if food_pos:  # If valid position found
+                self.foods.append(food_pos)
+        
+        # Update parent's food reference to first food for compatibility
+        self.food = self.foods[0] if self.foods else (0, 0)
+        
+        # Log food count changes
+        if hasattr(self, '_last_food_count') and self._last_food_count != target_food_count:
+            print(f"🎓 Food count changed: {self._last_food_count} → {target_food_count} (step {self.global_step_count:,})")
+        self._last_food_count = target_food_count
+    
+    def _place_single_food(self):
+        """Place a single food item at a random location"""
+        max_attempts = 100  # Prevent infinite loop
+        for _ in range(max_attempts):
+            food_pos = (
+                random.randint(0, (self.WINDOW_WIDTH - self.CELL_SIZE) // self.CELL_SIZE) * self.CELL_SIZE,
+                random.randint(0, (self.WINDOW_HEIGHT - self.CELL_SIZE) // self.CELL_SIZE) * self.CELL_SIZE
+            )
+            # Make sure food doesn't spawn on snake or other foods
+            if food_pos not in self.snake and food_pos not in self.foods:
+                return food_pos
+        return None  # Could not find valid position
+    
+    def _move_snake(self):
+        """Override parent's move_snake to handle multiple foods with curriculum learning"""
+        head_x, head_y = self.snake[0]
+        d_x, d_y = self.direction
+        new_head = (head_x + d_x, head_y + d_y)
+        self.snake.insert(0, new_head)
+        
+        # Check if any food eaten
+        if new_head in self.foods:
+            self.score += 1
+            # Remove eaten food
+            self.foods.remove(new_head)
+            
+            # 🎓 CURRICULUM LEARNING: Adjust food count based on current progress
+            target_food_count = self._get_current_food_count()
+            
+            # Add new food only if we haven't reached the target count
+            if len(self.foods) < target_food_count:
+                new_food = self._place_single_food()
+                if new_food:
+                    self.foods.append(new_food)
+            
+            # Update parent's food reference
+            self.food = self.foods[0] if self.foods else (0, 0)
+            return True
+        else:
+            self.snake.pop()
+            return False
+    
+    def _get_nearest_food_distance(self):
+        """Get distance to the nearest food"""
+        if not self.foods:
+            return float('inf')
+        
+        head_x, head_y = self.snake[0]
+        min_distance = float('inf')
+        
+        for food_x, food_y in self.foods:
+            distance = abs(head_x - food_x) + abs(head_y - food_y)
+            min_distance = min(min_distance, distance)
+        
+        return min_distance
     
     def get_state_array(self):
         """
@@ -178,13 +300,60 @@ class SnakeEnvironment(SnakeGame, gym.Env):
                 else:
                     grid[y, x] = 0.5    # Body = 0.5
         
-        # Mark food position  
-        food_x, food_y = self.food[0] // self.CELL_SIZE, self.food[1] // self.CELL_SIZE
-        if 0 <= food_x < grid_width and 0 <= food_y < grid_height:
-            grid[food_y, food_x] = -1.0  # Food = -1
+        # Mark all food positions
+        for food_pos in self.foods:
+            food_x, food_y = food_pos[0] // self.CELL_SIZE, food_pos[1] // self.CELL_SIZE
+            if 0 <= food_x < grid_width and 0 <= food_y < grid_height:
+                grid[food_y, food_x] = -1.0  # Food = -1
         
         # Flatten to 1D array (AI networks expect 1D input)
         return grid.flatten()
+    
+    def render(self):
+        """Override parent's render to show multiple foods"""
+        if not self.rendering:
+            self.init_pygame()
+        
+        # Handle pygame events
+        import pygame
+        import sys
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+        
+        # Clear screen
+        self.window.fill((0, 0, 0))
+        
+        # Draw snake
+        for segment in self.snake:
+            pygame.draw.rect(self.window, (0, 255, 0), (*segment, self.CELL_SIZE, self.CELL_SIZE))
+        
+        # Draw all foods
+        for food_pos in self.foods:
+            pygame.draw.rect(self.window, (255, 0, 0), (*food_pos, self.CELL_SIZE, self.CELL_SIZE))
+        
+        # Draw score
+        score_text = self.font.render(f"Score: {self.score}", True, (255, 255, 255))
+        self.window.blit(score_text, (10, 10))
+        
+        # Draw food count
+        food_count_text = self.font.render(f"Foods: {len(self.foods)}", True, (255, 255, 255))
+        self.window.blit(food_count_text, (10, 40))
+        
+        # Draw hunger level
+        hunger_text = self.font.render(f"Hunger: {self.steps_since_food}/{self.MAX_STARVATION_STEPS}", True, (255, 255, 255))
+        self.window.blit(hunger_text, (10, 70))
+        
+        # Draw game over message
+        if self.game_over:
+            game_over_text = self.font.render("Game Over! Press R to restart", True, (255, 255, 255))
+            text_rect = game_over_text.get_rect(center=(self.WINDOW_WIDTH//2, self.WINDOW_HEIGHT//2))
+            self.window.blit(game_over_text, text_rect)
+        
+        # Update display
+        pygame.display.flip()
+        self.clock.tick(self.FPS)
 
 # Test our basic environment
 if __name__ == "__main__":
