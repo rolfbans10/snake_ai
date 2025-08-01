@@ -16,12 +16,19 @@ class SnakeEnvironment(SnakeGame, gym.Env):
     HUNGER_MAX = 75           # Slower hunger buildup (more time to learn)
     DISTANCE_REWARD = 2.0     # Stronger guidance toward food
     DISTANCE_PENALTY = -2.0   # Stronger penalty for moving away
-    MAX_STARVATION_STEPS = 250  # More generous starvation limit (learning time)
+    MAX_STARVATION_STEPS = 2500  # More generous starvation limit (learning time)
+    
+    # 🔍 EXPLORATION REWARDS
+    EXPLORATION_REWARD = 1.0    # Reward for visiting new areas
+    EXPLORATION_DECAY = 0.95    # How quickly exploration reward decays for revisited areas
+    
+    # 🏆 WIN CONDITION
+    WIN_REWARD = 1000          # Massive reward for eating all foods (WIN CONDITION!)
     
     # 🎓 CURRICULUM LEARNING: Dynamic Food Count
-    INITIAL_FOODS = 10         # Start with many foods (easy)
-    FINAL_FOODS = 1           # End with single food (hard)
-    TOTAL_TRAINING_STEPS = 2500000  # Total training timesteps
+    INITIAL_FOODS = 1          # Start with single food (easy wins!)
+    FINAL_FOODS = 10          # End with many foods (hard challenge!)
+    TOTAL_TRAINING_STEPS = 1000000   # Total training timesteps (match actual training)
     
     def __init__(self):
         # Call the parent class constructor
@@ -43,10 +50,14 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         self.foods = []  # Initialize empty foods list
         self._last_food_count = self.INITIAL_FOODS  # Track food count changes
         
+        # 🔍 EXPLORATION TRACKING: Track visited positions
+        self.visited_positions = {}  # Track how many times each position was visited
+        
         print(f"🤖 AI Environment created!")
         print(f"   Action space: {self.action_space}")
         print(f"   Observation space: {self.observation_space}")
         print(f"🎓 Curriculum Learning: {self.INITIAL_FOODS} → {self.FINAL_FOODS} foods over {self.TOTAL_TRAINING_STEPS:,} steps")
+        print(f"🔍 Exploration Rewards: +{self.EXPLORATION_REWARD} for new areas, {self.EXPLORATION_DECAY}x decay for revisits")
     
     def reset(self, seed=None):
         """Reset environment for AI training"""
@@ -58,6 +69,12 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         
         # DISTANCE TRACKING: Track distance to food for directional rewards
         self.prev_distance_to_food = None
+        
+        # 🔍 EXPLORATION TRACKING: Reset exploration for new episode
+        if hasattr(self, 'visited_positions'):
+            self.visited_positions.clear()  # Clear visited positions for new episode
+        else:
+            self.visited_positions = {}  # Initialize if not exists
         
         # MULTI-FOOD SYSTEM: Override single food with multiple foods
         self._place_multiple_foods()
@@ -92,7 +109,7 @@ class SnakeEnvironment(SnakeGame, gym.Env):
                 ate_food = True
                 # RESET HUNGER when food is eaten!
                 self.steps_since_food = 0
-                print(f"    🍎 FOOD FOUND! Hunger reset. +{self.FOOD_REWARD} reward")
+                print(f"    🍎 FOOD FOUND! Score: {self.score}, Hunger reset. +{self.FOOD_REWARD} reward")
         
         # Store current score for next time
         self.prev_score = self.score
@@ -101,10 +118,14 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         distance_reward = self._calculate_distance_reward()
         reward += distance_reward
         
-        # STEP 4: STEP PENALTY - small penalty for each step to encourage efficiency
+        # STEP 4: EXPLORATION REWARD - encourage visiting new areas
+        exploration_reward = self._calculate_exploration_reward()
+        reward += exploration_reward
+        
+        # STEP 5: STEP PENALTY - small penalty for each step to encourage efficiency
         reward += self.STEP_PENALTY
         
-        # STEP 5: HUNGER PENALTY - grows over time without food
+        # STEP 6: HUNGER PENALTY - grows over time without food
         if not ate_food:
             # Progressive hunger penalty that gets worse over time
             hunger_penalty = (self.steps_since_food / self.HUNGER_MAX) ** 2
@@ -112,17 +133,46 @@ class SnakeEnvironment(SnakeGame, gym.Env):
             
             # Show hunger status occasionally
             if self.steps_since_food % 25 == 0:
-                print(f"    😰 HUNGER: {self.steps_since_food} steps, penalty: -{hunger_penalty:.2f}")
+                print(f"    😰 HUNGER: {self.steps_since_food} steps, Score: {self.score}, penalty: -{hunger_penalty:.2f}")
         
-        # STEP 6: STARVATION DEATH - force death if too many steps without food
+        # STEP 7: STARVATION DEATH - force death if too many steps without food
         if self.steps_since_food >= self.MAX_STARVATION_STEPS:
             self.game_over = True  # Force death due to starvation
-            print(f"    💀 STARVED TO DEATH! {self.steps_since_food} steps without food!")
+            print(f"    💀 STARVED TO DEATH! Score: {self.score}, {self.steps_since_food} steps without food!")
         
-        # STEP 7: Death penalty - overrides everything if we died
-        if self.game_over:
+        # STEP 8: WIN CONDITION - check if all foods eaten
+        if len(self.foods) == 0 and not self.game_over:
+            self.game_over = True  # End episode on victory
+            reward += self.WIN_REWARD  # Massive win bonus!
+            print(f"    🏆 VICTORY! All {self.score} foods eaten! +{self.WIN_REWARD} reward!")
+        
+        # STEP 9: Death penalty - only if we died (not if we won)
+        if self.game_over and len(self.foods) > 0:  # Only apply death penalty if we didn't win
             reward = self.DEATH_PENALTY  # Override any other rewards if we died
-            print(f"    💀 DEATH + STARVATION: {self.DEATH_PENALTY + (self.steps_since_food/10):.1f}")
+            
+            # Determine cause of death
+            if self.steps_since_food >= self.MAX_STARVATION_STEPS:
+                death_cause = "STARVATION"
+            else:
+                # Check collision type
+                head = self.snake[0]
+                if (head[0] < 0 or head[0] >= self.WINDOW_WIDTH or
+                    head[1] < 0 or head[1] >= self.WINDOW_HEIGHT):
+                    death_cause = "WALL COLLISION"
+                elif head in self.snake[1:]:
+                    death_cause = "SELF COLLISION"
+                else:
+                    death_cause = "UNKNOWN"
+            
+            print(f"    💀 DEATH ({death_cause}): Score: {self.score}, Areas: {len(self.visited_positions)}, Penalty: {self.DEATH_PENALTY:.1f}")
+        
+        # Log total reward for this step (for debugging) - only major events
+        if self.game_over and len(self.foods) == 0:  # Victory!
+            print(f"    💰 VICTORY REWARD: {reward:.2f}")
+        elif self.game_over:  # Death
+            print(f"    💰 DEATH REWARD: {reward:.2f}")
+        elif reward > 50:  # Only log significant positive rewards (food found)
+            print(f"    💰 BIG REWARD: {reward:.2f}")
         
         # Return in gym format: obs, reward, terminated, truncated, info
         observation = self.get_state_array()
@@ -132,7 +182,10 @@ class SnakeEnvironment(SnakeGame, gym.Env):
             'score': self.score, 
             'hunger': self.steps_since_food,
             'hunger_penalty': (self.steps_since_food / self.HUNGER_MAX) ** 2 if not ate_food else 0,
-            'starved_to_death': self.steps_since_food >= self.MAX_STARVATION_STEPS if self.game_over else False
+            'starved_to_death': self.steps_since_food >= self.MAX_STARVATION_STEPS if self.game_over else False,
+            'exploration_reward': exploration_reward,
+            'areas_explored': len(self.visited_positions),
+            'total_reward': reward
         }
         
         return observation, reward, terminated, truncated, info
@@ -140,23 +193,22 @@ class SnakeEnvironment(SnakeGame, gym.Env):
     def _get_current_food_count(self):
         """
         Calculate current number of foods based on training progress (curriculum learning)
-        Start with INITIAL_FOODS, gradually reduce to FINAL_FOODS
+        Start with 1 food, add 1 food every 10% of training progress
         """
         # Handle case where global_step_count not initialized yet (during __init__)
         if not hasattr(self, 'global_step_count'):
             return self.INITIAL_FOODS
             
-        if self.global_step_count >= self.TOTAL_TRAINING_STEPS:
-            return self.FINAL_FOODS
-        
         # Calculate progress as percentage (0.0 to 1.0)
         progress = self.global_step_count / self.TOTAL_TRAINING_STEPS
         
-        # Linear interpolation from INITIAL_FOODS to FINAL_FOODS
-        current_foods = self.INITIAL_FOODS - int(progress * (self.INITIAL_FOODS - self.FINAL_FOODS))
+        # Add 1 food every 10% of training progress
+        # 0-9%: 1 food, 10-19%: 2 foods, 20-29%: 3 foods, etc.
+        foods_to_add = int(progress * 10)  # 0, 1, 2, 3, ..., 9
+        current_foods = self.INITIAL_FOODS + foods_to_add
         
-        # Ensure we stay within bounds
-        return max(self.FINAL_FOODS, min(self.INITIAL_FOODS, current_foods))
+        # Cap at maximum foods
+        return min(current_foods, self.FINAL_FOODS)
     
     def _update_step_counter(self):
         """Update global step counter for curriculum learning"""
@@ -197,6 +249,34 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         
         return distance_reward
     
+    def _calculate_exploration_reward(self):
+        """
+        Calculate reward for exploration - encourage visiting new areas
+        Higher reward for first visit, decaying reward for revisits
+        """
+        # Get current snake head position
+        head_pos = tuple(self.snake[0])  # Convert to tuple for dictionary key
+        
+        # Track visits to this position
+        if head_pos not in self.visited_positions:
+            self.visited_positions[head_pos] = 0
+        
+        self.visited_positions[head_pos] += 1
+        visit_count = self.visited_positions[head_pos]
+        
+        # Calculate exploration reward (decays with repeated visits)
+        if visit_count == 1:
+            # First visit gets full reward
+            exploration_reward = self.EXPLORATION_REWARD
+            # Only log occasionally for new areas (every 10th new area)
+            if len(self.visited_positions) % 10 == 0:
+                print(f"    🔍 EXPLORED {len(self.visited_positions)} areas (Score: {self.score})")
+        else:
+            # Repeated visits get decaying reward
+            exploration_reward = self.EXPLORATION_REWARD * (self.EXPLORATION_DECAY ** (visit_count - 1))
+        
+        return exploration_reward
+    
     def _place_multiple_foods(self):
         """Place multiple food items on the board (curriculum learning - dynamic count)"""
         # 🎓 Get current food count based on training progress
@@ -211,9 +291,19 @@ class SnakeEnvironment(SnakeGame, gym.Env):
         # Update parent's food reference to first food for compatibility
         self.food = self.foods[0] if self.foods else (0, 0)
         
-        # Log food count changes
+        # Log food count changes and current status
         if hasattr(self, '_last_food_count') and self._last_food_count != target_food_count:
             print(f"🎓 Food count changed: {self._last_food_count} → {target_food_count} (step {self.global_step_count:,})")
+        
+        # Show current food count occasionally (every 100 episodes)
+        if not hasattr(self, '_episode_count'):
+            self._episode_count = 0
+        self._episode_count += 1
+        
+        if self._episode_count % 100 == 0:
+            progress = (self.global_step_count / self.TOTAL_TRAINING_STEPS) * 100
+            print(f"🍎 Episode {self._episode_count}: {target_food_count} foods available (Progress: {progress:.1f}%)")
+        
         self._last_food_count = target_food_count
     
     def _place_single_food(self):
