@@ -31,13 +31,14 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         # Define action space: 4 actions (up, right, down, left)
         self.action_space = spaces.Discrete(4)
         
-        # Define MINIMAL observation space (NO BOARD!)
+        # Define ENHANCED MINIMAL observation space (NO BOARD!)
         # Features: dangers(4) + food_direction(2) + wall_distances(4) + snake_length(1) + 
-        #          distance_to_food(1) + current_direction(1) + body_proximity(1) + reward_balance(1) = 15
+        #          distance_to_food(1) + current_direction(1) + body_proximity(1) + reward_balance(1) +
+        #          safe_moves_count(1) + recent_moves(2) + tail_direction(2) = 20
         self.observation_space = spaces.Box(
             low=-100.0,
             high=100.0, 
-            shape=(15,),  # Much smaller! 15 vs 777
+            shape=(20,),  # Enhanced: 20 vs 15 vs 777
             dtype=np.float32
         )
         
@@ -45,13 +46,14 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         self.current_reward_balance = self.INITIAL_BALANCE
         self.episode_step_count = 0
         self.prev_food_distance = None  # Track previous distance to food for directional rewards
+        self.move_history = [0, 0]  # Track last 2 moves for pattern detection
         
-        print(f"🐍 Minimal Snake Environment created!")
+        print(f"🐍 Enhanced Minimal Snake Environment created!")
         print(f"   Grid size: {self.grid_width}x{self.grid_height}")
         print(f"   Action space: {self.action_space}")
-        print(f"   Observation space: {self.observation_space} (MINIMAL - no board!)")
+        print(f"   Observation space: {self.observation_space} (ENHANCED MINIMAL - no board!)")
         print(f"   Rewards: +{self.FOOD_REWARD} food, {self.DEATH_PENALTY} death, {self.STEP_PENALTY} step, ±{self.DIRECTION_REWARD} direction")
-        print(f"   Features: Dangers(4) + FoodDir(2) + Walls(4) + Length(1) + Distance(1) + Direction(1) + BodyProx(1) + Balance(1) = 15")
+        print(f"   Features: Dangers(4) + FoodDir(2) + Walls(4) + Length(1) + Distance(1) + Direction(1) + BodyProx(1) + Balance(1) + SafeMoves(1) + History(2) + Tail(2) = 20")
     
     def reset(self, seed=None):
         """Reset environment"""
@@ -61,6 +63,7 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         self.current_reward_balance = self.INITIAL_BALANCE
         self.episode_step_count = 0
         self.prev_food_distance = None  # Reset distance tracking for new episode
+        self.move_history = [0, 0]  # Reset movement history for new episode
         
         # Return observation and info
         observation = self.get_observation()
@@ -97,6 +100,10 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         
         # Take a step in the base game
         super().step(action)
+        
+        # Update movement history (track last 2 moves)
+        self.move_history[1] = self.move_history[0]  # Previous move becomes older
+        self.move_history[0] = action  # Current move becomes most recent
         
         # Calculate reward for this step
         step_reward = 0
@@ -166,7 +173,16 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         # 8. Current reward balance (1 value) - performance tracking
         reward_value = [self.current_reward_balance]
         
-        # Combine all observations into minimal feature set
+        # 9. Safe moves count (1 value) - tactical awareness
+        safe_moves = [self.get_safe_moves_count()]
+        
+        # 10. Recent moves (2 values) - pattern detection
+        recent_moves = [float(self.move_history[0]), float(self.move_history[1])]
+        
+        # 11. Tail direction (2 values) - body management
+        tail_direction = self.get_tail_direction()
+        
+        # Combine all observations into enhanced minimal feature set
         observation = np.concatenate([
             danger_indicators,    # 4 values
             food_direction,       # 2 values
@@ -175,10 +191,13 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
             distance,             # 1 value
             direction_value,      # 1 value
             body_proximity,       # 1 value
-            reward_value          # 1 value
+            reward_value,         # 1 value
+            safe_moves,           # 1 value (NEW)
+            recent_moves,         # 2 values (NEW)
+            tail_direction        # 2 values (NEW)
         ], dtype=np.float32)
         
-        # Total: 15 values (vs 777 in full board version!)
+        # Total: 20 values (vs 15 before, vs 777 in full board version!)
         return observation
     
     def get_danger_indicators(self):
@@ -319,6 +338,30 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         self.prev_food_distance = current_distance
         
         return directional_reward
+    
+    def get_safe_moves_count(self):
+        """Get count of safe directions to move (0-1 normalized)"""
+        dangers = self.get_danger_indicators()
+        safe_count = sum(1 for d in dangers if d == 0.0)
+        return safe_count / 4.0  # Normalize to 0-1 range
+    
+    def get_tail_direction(self):
+        """Get normalized direction from head to tail"""
+        if len(self.snake) < 2:
+            return [0.0, 0.0]
+        
+        head_x, head_y = self.snake[0] 
+        tail_x, tail_y = self.snake[-1]
+        
+        # Calculate direction vector from head to tail
+        dx = tail_x - head_x
+        dy = tail_y - head_y
+        
+        # Normalize by window dimensions to get -1 to 1 range
+        dx_norm = dx / self.WINDOW_WIDTH
+        dy_norm = dy / self.WINDOW_HEIGHT
+        
+        return [dx_norm, dy_norm]
 
 # Test the minimal environment
 if __name__ == "__main__":
@@ -347,5 +390,6 @@ if __name__ == "__main__":
             print("   🎯 Game over!")
             break
     
-    print(f"\n🚀 Minimal environment ready for training!")
-    print(f"   🎯 15 features vs 777 - should train MUCH faster!")
+    print(f"\n🚀 Enhanced minimal environment ready for training!")
+    print(f"   🎯 20 features vs 777 - should train MUCH faster!")
+    print(f"   🆕 NEW: Safe moves count, movement history, tail direction")

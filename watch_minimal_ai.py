@@ -10,9 +10,10 @@ import time
 import os
 
 def main():
-    print("🎮 WATCHING MINIMAL AI PLAY SNAKE")
-    print("=" * 40)
-    print("🚀 Using MINIMAL feature set (15 dims vs 777)")
+    print("🎮 WATCHING ENHANCED MINIMAL AI PLAY SNAKE")
+    print("=" * 45)
+    print("🚀 Using ENHANCED MINIMAL feature set (20 dims vs 777)")
+    print("🆕 NEW: Safe moves count, movement history, tail direction")
     
     # Check if model exists
     model_path = "models/minimal_snake_ai"
@@ -51,8 +52,8 @@ def main():
             
             # Show initial observation (for debugging)
             if games_played == 1:
-                print(f"   📊 Initial observation (15 features): {obs}")
-                print(f"   Features: [dangers(4), food_dir(2), walls(4), length(1), distance(1), direction(1), body_prox(1), balance(1)]")
+                print(f"   📊 Initial observation (20 features): {obs}")
+                print(f"   Features: [dangers(4), food_dir(2), walls(4), length(1), distance(1), direction(1), body_prox(1), balance(1), safe_moves(1), history(2), tail_dir(2)]")
             
             while True:
                 # Render the game
@@ -192,7 +193,10 @@ def show_observation_details():
     print(f"  [12]    Current direction: {obs[12]} (0=up,1=right,2=down,3=left)")
     print(f"  [13]    Body proximity: {obs[13]} (distance to nearest body segment)")
     print(f"  [14]    Reward balance: {obs[14]} (current performance)")
-    print(f"\n🚀 Much cleaner and focused than 777-dimension board!")
+    print(f"  [15]    Safe moves count: {obs[15]} (0-1, how many directions are safe)")
+    print(f"  [16-17] Movement history: {obs[16:18]} (last 2 moves for pattern detection)")
+    print(f"  [18-19] Tail direction: {obs[18:20]} (dx,dy from head to tail)")
+    print(f"\n🚀 Enhanced with tactical awareness - much smarter than 777-dimension board!")
 
 if __name__ == "__main__":
     import sys
