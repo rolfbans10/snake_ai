@@ -13,6 +13,8 @@ class SimpleSnakeEnvironment(SnakeGame, gym.Env):
     FOOD_REWARD = 10        # +10 for eating food
     DEATH_PENALTY = -1      # -1 for dying
     STEP_PENALTY = -0.01     # -0.1 each step
+    DIRECTION_REWARD = 0.5   # +0.5 for moving toward food
+    DIRECTION_PENALTY = -0.001 # -0.5 for moving away from food
     
     def __init__(self):
         # Set grid dimensions first (needed before parent init)
@@ -29,22 +31,25 @@ class SimpleSnakeEnvironment(SnakeGame, gym.Env):
         self.action_space = spaces.Discrete(4)
         
         # Define observation space
-        # Board (24x32=768) + reward(1) + direction(1) + food_quadrant(1) + distance(1) + score(1) = 773
+        # Board (24x32=768) + reward(1) + direction(1) + food_quadrant(1) + distance(1) + score(1) + danger(4) = 777
         self.observation_space = spaces.Box(
             low=-100.0,
             high=100.0, 
-            shape=(773,),
+            shape=(777,),
             dtype=np.float32
         )
         
         # Initialize tracking variables
         self.current_reward_balance = self.INITIAL_BALANCE
         self.episode_step_count = 0
+        self.prev_food_distance = None  # Track previous distance to food for directional rewards
         
         print(f"🐍 Simple Snake Environment created!")
         print(f"   Grid size: {self.grid_width}x{self.grid_height}")
         print(f"   Action space: {self.action_space}")
         print(f"   Observation space: {self.observation_space}")
+        print(f"   Rewards: +{self.FOOD_REWARD} food, {self.DEATH_PENALTY} death, {self.STEP_PENALTY} step, ±{self.DIRECTION_REWARD} direction")
+        print(f"   Features: Board(768) + Reward(1) + Direction(1) + FoodQuad(1) + Distance(1) + Score(1) + Dangers(4)")
     
     def reset(self, seed=None):
         """Reset environment"""
@@ -53,6 +58,7 @@ class SimpleSnakeEnvironment(SnakeGame, gym.Env):
         # Reset tracking variables
         self.current_reward_balance = self.INITIAL_BALANCE
         self.episode_step_count = 0
+        self.prev_food_distance = None  # Reset distance tracking for new episode
         
         # Return observation and info
         observation = self.get_observation()
@@ -102,6 +108,10 @@ class SimpleSnakeEnvironment(SnakeGame, gym.Env):
             step_reward += self.FOOD_REWARD
             print(f"    🍎 Food eaten! Score: {self.score}, Reward: +{self.FOOD_REWARD}")
         
+        # Directional reward (encourage moving toward food)
+        directional_reward = self._calculate_directional_reward()
+        step_reward += directional_reward
+        
         # Death penalty
         if self.game_over:
             step_reward += self.DEATH_PENALTY
@@ -122,7 +132,8 @@ class SimpleSnakeEnvironment(SnakeGame, gym.Env):
             'score': self.score,
             'reward_balance': self.current_reward_balance,
             'step_count': self.episode_step_count,
-            'step_reward': step_reward
+            'step_reward': step_reward,
+            'directional_reward': directional_reward
         }
         
         return observation, step_reward, terminated, truncated, info
@@ -147,14 +158,18 @@ class SimpleSnakeEnvironment(SnakeGame, gym.Env):
         # 6. Current score
         score_value = [float(self.score)]
         
+        # 7. Danger indicators (NEW - helps avoid immediate death)
+        danger_indicators = self.get_danger_indicators()
+        
         # Combine all observations
         observation = np.concatenate([
-            board.flatten(),
-            reward_value,
-            direction_value, 
-            food_quadrant,
-            distance,
-            score_value
+            board.flatten(),        # 768 values
+            reward_value,          # 1 value
+            direction_value,       # 1 value
+            food_quadrant,         # 1 value
+            distance,              # 1 value
+            score_value,           # 1 value
+            danger_indicators      # 4 values (NEW)
         ], dtype=np.float32)
         
         return observation
@@ -232,6 +247,66 @@ class SimpleSnakeEnvironment(SnakeGame, gym.Env):
         
         distance = abs(head_x - food_x) + abs(head_y - food_y)
         return distance / self.CELL_SIZE  # Normalize by cell size
+    
+    def _calculate_directional_reward(self):
+        """Calculate reward for moving toward/away from food"""
+        current_distance = self.get_distance_to_food()
+        
+        # If this is the first step of episode, just store distance
+        if self.prev_food_distance is None:
+            self.prev_food_distance = current_distance
+            return 0.0
+        
+        # Calculate distance change
+        distance_change = self.prev_food_distance - current_distance
+        
+        # Give reward/penalty based on direction
+        if distance_change > 0:  # Got closer to food
+            directional_reward = distance_change * self.DIRECTION_REWARD
+        elif distance_change < 0:  # Got farther from food
+            directional_reward = distance_change * abs(self.DIRECTION_PENALTY)  # This will be negative
+        else:  # Same distance
+            directional_reward = 0.0
+        
+        # Update for next step
+        self.prev_food_distance = current_distance
+        
+        return directional_reward
+    
+    def get_danger_indicators(self):
+        """
+        Get danger indicators for each direction (up, right, down, left)
+        Returns [up_danger, right_danger, down_danger, left_danger]
+        1.0 = danger (wall or self collision), 0.0 = safe
+        """
+        if not self.snake:
+            return [0.0, 0.0, 0.0, 0.0]
+        
+        head_x, head_y = self.snake[0]
+        dangers = []
+        
+        # Check each direction: up, right, down, left (matching action space)
+        directions = [
+            (0, -self.CELL_SIZE),   # up (action 0)
+            (self.CELL_SIZE, 0),    # right (action 1)  
+            (0, self.CELL_SIZE),    # down (action 2)
+            (-self.CELL_SIZE, 0)    # left (action 3)
+        ]
+        
+        for dx, dy in directions:
+            next_x, next_y = head_x + dx, head_y + dy
+            
+            # Check wall collision
+            wall_danger = (next_x < 0 or next_x >= self.WINDOW_WIDTH or 
+                          next_y < 0 or next_y >= self.WINDOW_HEIGHT)
+            
+            # Check self collision
+            self_danger = (next_x, next_y) in self.snake
+            
+            # 1.0 if dangerous, 0.0 if safe
+            dangers.append(1.0 if (wall_danger or self_danger) else 0.0)
+        
+        return dangers
 
 # Test the simple environment
 if __name__ == "__main__":
