@@ -12,7 +12,7 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
     # Simple reward system
     INITIAL_BALANCE = 1    # Starting balance
     FOOD_REWARD = 10        # +10 for eating food
-    DEATH_PENALTY = -1      # -1 for dying
+    BASE_DEATH_PENALTY = -1  # Base death penalty (scales with length)
     STEP_PENALTY = -0.01     # -0.01 each step
     DIRECTION_REWARD = 0.5   # +0.5 for moving toward food
     DIRECTION_PENALTY = -0.5 # -0.5 for moving away from food
@@ -52,7 +52,7 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         print(f"   Grid size: {self.grid_width}x{self.grid_height}")
         print(f"   Action space: {self.action_space}")
         print(f"   Observation space: {self.observation_space} (ENHANCED MINIMAL - no board!)")
-        print(f"   Rewards: +{self.FOOD_REWARD} food, {self.DEATH_PENALTY} death, {self.STEP_PENALTY} step, ±{self.DIRECTION_REWARD} direction")
+        print(f"   Rewards: +{self.FOOD_REWARD} food, {self.BASE_DEATH_PENALTY}*length death (DYNAMIC!), {self.STEP_PENALTY} step, ±{self.DIRECTION_REWARD} direction")
         print(f"   Features: Dangers(4) + FoodDir(2) + Walls(4) + Length(1) + Distance(1) + Direction(1) + BodyProx(1) + Balance(1) + SafeMoves(1) + History(2) + Tail(2) = 20")
     
     def reset(self, seed=None):
@@ -121,12 +121,14 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         directional_reward = self._calculate_directional_reward()
         step_reward += directional_reward
         
-        # Death penalty
+        # Dynamic death penalty (scales with snake length)
         if self.game_over:
-            step_reward += self.DEATH_PENALTY
+            death_penalty = self.get_dynamic_death_penalty()
+            step_reward += death_penalty
             # Update reward balance first to get final total
             self.current_reward_balance += step_reward
-            print(f"    💀 Game over! Final score: {self.score}, Steps: {self.episode_step_count}, Final balance: {self.current_reward_balance:.2f}, Death penalty: {self.DEATH_PENALTY}")
+            print(f"    💀 Game over! Final score: {self.score}, Length: {len(self.snake)}, Steps: {self.episode_step_count}")
+            print(f"       Final balance: {self.current_reward_balance:.2f}, Dynamic death penalty: {death_penalty:.2f}")
         else:
             # Update reward balance for non-death steps
             self.current_reward_balance += step_reward
@@ -142,7 +144,9 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
             'reward_balance': self.current_reward_balance,
             'step_count': self.episode_step_count,
             'step_reward': step_reward,
-            'directional_reward': directional_reward
+            'directional_reward': directional_reward,
+            'death_penalty': self.get_dynamic_death_penalty() if self.game_over else 0,
+            'snake_length': len(self.snake)
         }
         
         return observation, step_reward, terminated, truncated, info
@@ -362,6 +366,26 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         dy_norm = dy / self.WINDOW_HEIGHT
         
         return [dx_norm, dy_norm]
+    
+    def get_dynamic_death_penalty(self):
+        """
+        Calculate death penalty based on snake length
+        The longer the snake, the more severe the penalty for dying
+        """
+        snake_length = len(self.snake)
+        initial_length = 3  # Starting snake length
+        
+        # Length-based multiplier: starts at 1.0, increases with growth
+        # Formula: penalty = base * (current_length / initial_length)
+        length_multiplier = snake_length / initial_length
+        
+        # Cap the maximum penalty to prevent excessive punishment
+        max_multiplier = 5.0  # Maximum 5x penalty
+        length_multiplier = min(length_multiplier, max_multiplier)
+        
+        dynamic_penalty = self.BASE_DEATH_PENALTY * length_multiplier
+        
+        return dynamic_penalty
 
 # Test the minimal environment
 if __name__ == "__main__":
