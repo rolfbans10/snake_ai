@@ -43,7 +43,7 @@ def main(training_steps=250000):
         gamma=0.99,            # Discount factor
         gae_lambda=0.95,       # GAE lambda
         clip_range=0.2,        # PPO clip range
-        device="cpu",          # Use CPU (change to "cuda" if you have GPU)
+        device="cuda",          # Use CPU (change to "cuda" if you have GPU)
         tensorboard_log="./tensorboard_logs_simple/"
     )
     

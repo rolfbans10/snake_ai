@@ -46,7 +46,7 @@ def main():
     print("\n🧠 STEP 2: Loading existing model...")
     
     try:
-        model = PPO.load("models/best_model", env=env, device="cpu")
+        model = PPO.load("models/best_model", env=env, device="cuda")
         print(f"✅ Loaded existing model to continue training!")
         print(f"   Will continue from where training left off")
     except:
