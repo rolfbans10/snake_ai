@@ -25,20 +25,22 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         self.grid_height = self.WINDOW_HEIGHT // self.CELL_SIZE  # 24
         self.grid_width = self.WINDOW_WIDTH // self.CELL_SIZE    # 32
         
+        # Calculate max snake length for normalization (needed before parent init calls reset)
+        self.max_snake_length = self.grid_width * self.grid_height
+        
         # Call parent constructor with our dimensions
         super().__init__(width=self.WINDOW_WIDTH, height=self.WINDOW_HEIGHT, cell_size=self.CELL_SIZE)
         
         # Define action space: 4 actions (up, right, down, left)
         self.action_space = spaces.Discrete(4)
         
-        # Define ENHANCED MINIMAL observation space (NO BOARD!)
-        # Features: dangers(4) + food_direction(2) + wall_distances(4) + snake_length(1) + 
-        #          distance_to_food(1) + current_direction(1) + body_proximity(1) + reward_balance(1) +
-        #          safe_moves_count(1) + recent_moves(2) + tail_direction(2) = 20
+        # Define IMPROVED observation space (NO BOARD!)
+        # Features: dangers(4) + food_binary(4) + distance(1) + direction_onehot(4) + 
+        #          safe_moves(1) + snake_length(1) + body_proximity(1) = 16
         self.observation_space = spaces.Box(
-            low=-100.0,
-            high=100.0, 
-            shape=(20,),  # Enhanced: 20 vs 15 vs 777
+            low=0.0,
+            high=1.0, 
+            shape=(16,),  # Improved: 16 features, all properly normalized
             dtype=np.float32
         )
         
@@ -46,14 +48,13 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         self.current_reward_balance = self.INITIAL_BALANCE
         self.episode_step_count = 0
         self.prev_food_distance = None  # Track previous distance to food for directional rewards
-        self.move_history = [0, 0]  # Track last 2 moves for pattern detection
         
-        print(f"🐍 Enhanced Minimal Snake Environment created!")
+        print(f"🐍 Improved Minimal Snake Environment created!")
         print(f"   Grid size: {self.grid_width}x{self.grid_height}")
         print(f"   Action space: {self.action_space}")
-        print(f"   Observation space: {self.observation_space} (ENHANCED MINIMAL - no board!)")
-        print(f"   Rewards: +{self.FOOD_REWARD} food, +{self.SURVIVAL_REWARD} survive, +{self.DIRECTION_REWARD}/cell toward food, no death penalty")
-        print(f"   Features: Dangers(4) + FoodDir(2) + Walls(4) + Length(1) + Distance(1) + Direction(1) + BodyProx(1) + Balance(1) + SafeMoves(1) + History(2) + Tail(2) = 20")
+        print(f"   Observation space: {self.observation_space} (16 features, all normalized 0-1)")
+        print(f"   Rewards: +{self.FOOD_REWARD} food, +{self.SURVIVAL_REWARD} survive, +{self.DIRECTION_REWARD}/cell toward food")
+        print(f"   Features: Dangers(4) + FoodBinary(4) + Distance(1) + DirectionOneHot(4) + SafeMoves(1) + Length(1) + BodyProx(1) = 16")
     
     def reset(self, seed=None):
         """Reset environment"""
@@ -63,7 +64,6 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         self.current_reward_balance = self.INITIAL_BALANCE
         self.episode_step_count = 0
         self.prev_food_distance = None  # Reset distance tracking for new episode
-        self.move_history = [0, 0]  # Reset movement history for new episode
         
         # Return observation and info
         observation = self.get_observation()
@@ -100,10 +100,6 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         
         # Take a step in the base game
         super().step(action)
-        
-        # Update movement history (track last 2 moves)
-        self.move_history[1] = self.move_history[0]  # Previous move becomes older
-        self.move_history[0] = action  # Current move becomes most recent
         
         # Calculate reward for this step
         step_reward = 0
@@ -147,56 +143,40 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         return observation, step_reward, terminated, truncated, info
     
     def get_observation(self):
-        """Get MINIMAL observation (NO BOARD!)"""
-        # 1. Danger indicators (4 values) - immediate safety
+        """Get IMPROVED observation - 16 features, all normalized 0-1"""
+        # 1. Danger indicators (4 values) - immediate collision detection
         danger_indicators = self.get_danger_indicators()
         
-        # 2. Food direction vector (2 values) - where is food relative to head
-        food_direction = self.get_food_direction_vector()
+        # 2. Food direction binary (4 values) - is food up/right/down/left?
+        food_binary = self.get_food_direction_binary()
         
-        # 3. Wall distances (4 values) - spatial awareness
-        wall_distances = self.get_wall_distances()
-        
-        # 4. Snake length (1 value) - growth tracking
-        snake_length = [float(len(self.snake))]
-        
-        # 5. Distance to food (1 value) - how far to food
+        # 3. Distance to food (1 value) - normalized 0-1
         distance = [self.get_distance_to_food()]
         
-        # 6. Current direction (1 value) - movement state
-        direction_value = [float(self.get_direction_encoding())]
+        # 4. Current direction one-hot (4 values) - proper encoding
+        direction_onehot = self.get_direction_onehot()
         
-        # 7. Body proximity (1 value) - collision risk
-        body_proximity = [self.get_body_proximity()]
-        
-        # 8. Current reward balance (1 value) - performance tracking
-        reward_value = [self.current_reward_balance]
-        
-        # 9. Safe moves count (1 value) - tactical awareness
+        # 5. Safe moves count (1 value) - normalized 0-1
         safe_moves = [self.get_safe_moves_count()]
         
-        # 10. Recent moves (2 values) - pattern detection
-        recent_moves = [float(self.move_history[0]), float(self.move_history[1])]
+        # 6. Snake length (1 value) - normalized 0-1
+        snake_length = [len(self.snake) / self.max_snake_length]
         
-        # 11. Tail direction (2 values) - body management
-        tail_direction = self.get_tail_direction()
+        # 7. Body proximity (1 value) - normalized 0-1
+        body_proximity = [self.get_body_proximity_normalized()]
         
-        # Combine all observations into enhanced minimal feature set
+        # Combine all observations
         observation = np.concatenate([
-            danger_indicators,    # 4 values
-            food_direction,       # 2 values
-            wall_distances,       # 4 values
-            snake_length,         # 1 value
-            distance,             # 1 value
-            direction_value,      # 1 value
-            body_proximity,       # 1 value
-            reward_value,         # 1 value
-            safe_moves,           # 1 value (NEW)
-            recent_moves,         # 2 values (NEW)
-            tail_direction        # 2 values (NEW)
+            danger_indicators,    # 4 values (0 or 1)
+            food_binary,          # 4 values (0 or 1)
+            distance,             # 1 value (0 to 1)
+            direction_onehot,     # 4 values (one-hot)
+            safe_moves,           # 1 value (0 to 1)
+            snake_length,         # 1 value (0 to 1)
+            body_proximity        # 1 value (0 to 1)
         ], dtype=np.float32)
         
-        # Total: 20 values (vs 15 before, vs 777 in full board version!)
+        # Total: 16 values, all in 0-1 range
         return observation
     
     def get_danger_indicators(self):
@@ -234,45 +214,41 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         
         return dangers
     
-    def get_food_direction_vector(self):
-        """Get normalized direction vector to food (dx, dy)"""
+    def get_food_direction_binary(self):
+        """Get binary indicators for food direction [up, right, down, left]"""
         if not self.food or not self.snake:
-            return [0.0, 0.0]
+            return [0.0, 0.0, 0.0, 0.0]
         
         head_x, head_y = self.snake[0]
         food_x, food_y = self.food
         
-        # Calculate direction vector
-        dx = food_x - head_x
-        dy = food_y - head_y
+        # Binary indicators for each direction
+        food_up = 1.0 if food_y < head_y else 0.0
+        food_right = 1.0 if food_x > head_x else 0.0
+        food_down = 1.0 if food_y > head_y else 0.0
+        food_left = 1.0 if food_x < head_x else 0.0
         
-        # Normalize to -1 to 1 range
-        max_dist = max(abs(dx), abs(dy), 1)  # Avoid division by zero
-        
-        return [dx / max_dist, dy / max_dist]
+        return [food_up, food_right, food_down, food_left]
     
-    def get_wall_distances(self):
-        """Get distance to walls in each direction [up, right, down, left]"""
-        if not self.snake:
-            return [0.0, 0.0, 0.0, 0.0]
+    def get_direction_onehot(self):
+        """Get current direction as one-hot encoded [up, right, down, left]"""
+        onehot = [0.0, 0.0, 0.0, 0.0]
         
-        head_x, head_y = self.snake[0]
+        if self.direction == (0, -self.CELL_SIZE):     # up
+            onehot[0] = 1.0
+        elif self.direction == (self.CELL_SIZE, 0):    # right
+            onehot[1] = 1.0
+        elif self.direction == (0, self.CELL_SIZE):    # down
+            onehot[2] = 1.0
+        elif self.direction == (-self.CELL_SIZE, 0):   # left
+            onehot[3] = 1.0
         
-        distances = [
-            head_y,                                        # distance to top wall
-            self.WINDOW_WIDTH - head_x - self.CELL_SIZE,   # distance to right wall  
-            self.WINDOW_HEIGHT - head_y - self.CELL_SIZE,  # distance to bottom wall
-            head_x                                         # distance to left wall
-        ]
-        
-        # Normalize by cell size and max distance
-        max_distance = max(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
-        return [d / max_distance for d in distances]
+        return onehot
     
-    def get_body_proximity(self):
-        """Get distance to nearest body segment (excluding head and neck)"""
+    def get_body_proximity_normalized(self):
+        """Get normalized proximity to nearest body segment (0 = far, 1 = adjacent)"""
         if len(self.snake) <= 3:
-            return 10.0  # No body segments close enough to matter
+            return 0.0  # No dangerous body segments
         
         head_x, head_y = self.snake[0]
         min_dist = float('inf')
@@ -282,9 +258,13 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
             dist = abs(head_x - segment[0]) + abs(head_y - segment[1])
             min_dist = min(min_dist, dist)
         
-        # Normalize and cap at reasonable value
-        normalized_dist = min_dist / self.CELL_SIZE
-        return min(normalized_dist, 10.0)  # Cap at 10 for reasonable range
+        # Normalize: 1 cell = 1.0, farther = lower value
+        # Max meaningful distance is ~10 cells
+        if min_dist == float('inf'):
+            return 0.0
+        
+        proximity = 1.0 - min(min_dist / self.CELL_SIZE / 10.0, 1.0)
+        return proximity
     
     def get_distance_to_food(self):
         """Get normalized Manhattan distance to food"""
@@ -299,19 +279,6 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         # Normalize by maximum possible distance
         max_distance = self.WINDOW_WIDTH + self.WINDOW_HEIGHT
         return distance / max_distance
-    
-    def get_direction_encoding(self):
-        """Encode current direction as 0-3"""
-        if self.direction == (0, -self.CELL_SIZE):     # up
-            return 0
-        elif self.direction == (self.CELL_SIZE, 0):    # right
-            return 1
-        elif self.direction == (0, self.CELL_SIZE):    # down
-            return 2
-        elif self.direction == (-self.CELL_SIZE, 0):   # left
-            return 3
-        else:
-            return 0  # default
     
     def _calculate_directional_reward(self):
         """Calculate reward for moving toward/away from food using RAW distance (in cells)"""
@@ -359,24 +326,6 @@ class MinimalSnakeEnvironment(SnakeGame, gym.Env):
         safe_count = sum(1 for d in dangers if d == 0.0)
         return safe_count / 4.0  # Normalize to 0-1 range
     
-    def get_tail_direction(self):
-        """Get normalized direction from head to tail"""
-        if len(self.snake) < 2:
-            return [0.0, 0.0]
-        
-        head_x, head_y = self.snake[0] 
-        tail_x, tail_y = self.snake[-1]
-        
-        # Calculate direction vector from head to tail
-        dx = tail_x - head_x
-        dy = tail_y - head_y
-        
-        # Normalize by window dimensions to get -1 to 1 range
-        dx_norm = dx / self.WINDOW_WIDTH
-        dy_norm = dy / self.WINDOW_HEIGHT
-        
-        return [dx_norm, dy_norm]
-    
 # Test the minimal environment
 if __name__ == "__main__":
     env = MinimalSnakeEnvironment()
@@ -404,6 +353,6 @@ if __name__ == "__main__":
             print("   🎯 Game over!")
             break
     
-    print(f"\n🚀 Enhanced minimal environment ready for training!")
-    print(f"   🎯 20 features vs 777 - should train MUCH faster!")
-    print(f"   🆕 NEW: Safe moves count, movement history, tail direction")
+    print(f"\n🚀 Improved minimal environment ready for training!")
+    print(f"   🎯 16 features (all normalized 0-1) vs 777 - trains MUCH faster!")
+    print(f"   ✨ Improved: One-hot direction, binary food direction, proper normalization")
