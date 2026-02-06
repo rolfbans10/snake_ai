@@ -20,7 +20,8 @@ def main(training_steps=250000):
     env = SimpleSnakeEnvironment()
     
     # Wrap with Monitor to track statistics
-    env = Monitor(env, "logs_simple/")
+    os.makedirs("logs/simple", exist_ok=True)
+    env = Monitor(env, "logs/simple/")
     
     print(f"✅ Simple environment ready!")
     print(f"   Action space: {env.action_space}")
@@ -44,7 +45,7 @@ def main(training_steps=250000):
         gae_lambda=0.95,       # GAE lambda
         clip_range=0.2,        # PPO clip range
         device="cuda",          # Use CPU (change to "cuda" if you have GPU)
-        tensorboard_log="./tensorboard_logs_simple/"
+        tensorboard_log="./logs/tensorboard/simple/"
     )
     
     print(f"✅ Neural network created!")
@@ -60,11 +61,12 @@ def main(training_steps=250000):
     print("This will take several minutes...")
     
     # Create evaluation environment for monitoring progress
-    eval_env = Monitor(SimpleSnakeEnvironment(), "logs_simple/eval/")
+    os.makedirs("logs/simple/eval", exist_ok=True)
+    eval_env = Monitor(SimpleSnakeEnvironment(), "logs/simple/eval/")
     eval_callback = EvalCallback(
         eval_env, 
         best_model_save_path="./models/",
-        log_path="./logs_simple/", 
+        log_path="./logs/simple/", 
         eval_freq=10000,      # Evaluate every 10k steps
         deterministic=True, 
         render=False,
@@ -228,8 +230,8 @@ if __name__ == "__main__":
     
     # Create directories for saving models and logs
     os.makedirs("models", exist_ok=True)
-    os.makedirs("logs_simple", exist_ok=True)
-    os.makedirs("logs_simple/eval", exist_ok=True)
-    os.makedirs("tensorboard_logs_simple", exist_ok=True)
+    os.makedirs("logs/simple", exist_ok=True)
+    os.makedirs("logs/simple/eval", exist_ok=True)
+    os.makedirs("logs/tensorboard/simple", exist_ok=True)
     
     main(training_steps)

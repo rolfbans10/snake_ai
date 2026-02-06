@@ -2,60 +2,76 @@
 """
 Minimal Neural Network Training Script for Snake AI
 Training script for the minimal Snake environment with focused feature set (no board)
+
+Usage:
+    python train_minimal_ai.py --arch 64 64 --steps 250000 --device cpu
+    python train_minimal_ai.py --arch 28 28 28 --steps 500000 --device cuda
+    python train_minimal_ai.py --arch 10 10 --steps 100000 --name tiny_model
 """
 
 from snake_env_simple_minimal import MinimalSnakeEnvironment
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import EvalCallback
+import argparse
 import os
 
-def main(training_steps=250000):
+
+def main(training_steps: int, arch: list, device: str, model_name: str):
+    # Create architecture string for display
+    arch_str = "x".join(map(str, arch))
+    
     print("🧠 MINIMAL NEURAL NETWORK TRAINING FOR SNAKE AI")
-    print("=" * 55)
+    print("=" * 60)
     print(f"🎯 Training for {training_steps:,} steps")
-    print("🚀 Using MINIMAL feature set (15 dims vs 777) - much faster training!")
+    print(f"🏗️  Architecture: {arch} ({arch_str})")
+    print(f"💻 Device: {device}")
+    print(f"💾 Model name: {model_name}")
+    print("🚀 Using MINIMAL feature set (20 dims) - much faster training!")
+    
+    # Create log directory based on model name (organized under logs/)
+    log_dir = f"logs/minimal_{model_name}"
+    tensorboard_dir = f"logs/tensorboard/minimal_{model_name}"
     
     # STEP 1: Create the training environment
     print("\n📋 STEP 1: Setting up minimal environment...")
     env = MinimalSnakeEnvironment()
     
     # Wrap with Monitor to track statistics
-    env = Monitor(env, "logs_minimal/")
+    os.makedirs(log_dir, exist_ok=True)
+    env = Monitor(env, f"{log_dir}/")
     
     print(f"✅ Minimal environment ready!")
     print(f"   Action space: {env.action_space}")
     print(f"   Observation space: {env.observation_space}")
     print(f"   Reward system: +10 food, -1 death, -0.01 step, ±0.5 direction")
-    print(f"   🎯 Only 15 features vs 777 - expect 10x faster training!")
     
     # STEP 2: Create the AI agent (Neural Network)
     print("\n🧠 STEP 2: Creating neural network...")
     
     # PPO = Proximal Policy Optimization
-    # Optimized parameters for minimal observation space
     model = PPO(
-        "MlpPolicy",  # Multi-layer perceptron
+        "MlpPolicy",
         env,
-        verbose=1,    # Print training progress
-        learning_rate=0.003,   # Higher learning rate for smaller input space
-        n_steps=1024,          # Smaller steps per batch (faster iteration)
-        batch_size=64,         # Training batch size
-        n_epochs=10,           # Training epochs per batch
-        gamma=0.99,            # Discount factor
-        gae_lambda=0.95,       # GAE lambda
-        clip_range=0.2,        # PPO clip range
-        device="cpu",          # Use CPU (change to "cuda" if you have GPU)
-        tensorboard_log="./tensorboard_logs_minimal/",
+        verbose=1,
+        learning_rate=0.003,
+        n_steps=1024,
+        batch_size=64,
+        n_epochs=10,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2,
+        device=device,
+        tensorboard_log=f"./{tensorboard_dir}/",
         policy_kwargs=dict(
-            net_arch=[64, 64]  # Smaller network for smaller input space
+            net_arch=arch
         )
     )
     
     print(f"✅ Neural network created!")
     print(f"   Policy: {model.policy}")
     print(f"   Device: {model.device}")
-    print(f"   Network size: Optimized for 15-dim input (smaller & faster)")
+    print(f"   Network: {arch}")
     
     # STEP 3: Test random agent first (baseline)
     print("\n🎲 STEP 3: Testing random agent (baseline)...")
@@ -66,15 +82,16 @@ def main(training_steps=250000):
     print("This should be MUCH faster than the full board version...")
     
     # Create evaluation environment for monitoring progress
-    eval_env = Monitor(MinimalSnakeEnvironment(), "logs_minimal/eval/")
+    os.makedirs(f"{log_dir}/eval", exist_ok=True)
+    eval_env = Monitor(MinimalSnakeEnvironment(), f"{log_dir}/eval/")
     eval_callback = EvalCallback(
         eval_env, 
         best_model_save_path="./models/",
-        log_path="./logs_minimal/", 
-        eval_freq=5000,       # Evaluate every 5k steps (more frequent)
+        log_path=f"./{log_dir}/", 
+        eval_freq=5000,
         deterministic=True, 
         render=False,
-        n_eval_episodes=10    # Run 10 episodes for evaluation
+        n_eval_episodes=10
     )
     
     # Train with specified number of steps
@@ -88,17 +105,20 @@ def main(training_steps=250000):
     
     # STEP 5: Save the trained model
     print("\n💾 STEP 5: Saving trained model...")
-    model.save("models/minimal_snake_ai")
-    print("✅ Model saved as 'models/minimal_snake_ai'")
+    model_path = f"models/{model_name}"
+    model.save(model_path)
+    print(f"✅ Model saved as '{model_path}'")
     
     # STEP 6: Test the trained AI
     print("\n🧪 STEP 6: Testing trained AI...")
     test_trained_agent(model, env, episodes=10)
     
     print("\n🎉 MINIMAL TRAINING COMPLETE!")
-    print("Your minimal AI snake is ready! 🐍🧠")
-    print("Run 'python watch_minimal_ai.py' to watch it play!")
-    print("🚀 Compare with full board version using 'python train_simple_ai.py'")
+    print(f"📁 Model: models/{model_name}.zip")
+    print(f"📊 Logs: {log_dir}/")
+    print(f"📈 TensorBoard: tensorboard --logdir logs/tensorboard/")
+    print(f"\nWatch it play: python watch_minimal_ai.py --model {model_name}")
+
 
 def test_random_agent(env, episodes=5):
     """Test how well a random agent performs"""
@@ -115,7 +135,6 @@ def test_random_agent(env, episodes=5):
         episode_reward = 0
         
         while True:
-            # Random action
             action = env.action_space.sample()
             obs, reward, terminated, truncated, info = env.step(action)
             episode_steps += 1
@@ -125,7 +144,6 @@ def test_random_agent(env, episodes=5):
                 episode_score = info['score']
                 break
                 
-            # Prevent infinite episodes
             if episode_steps > 1000:
                 episode_score = info['score']
                 break
@@ -145,6 +163,7 @@ def test_random_agent(env, episodes=5):
     print(f"   Average Final Balance: {avg_reward:.1f}")
     print(f"   Best Score: {max(total_scores)}")
 
+
 def test_trained_agent(model, env, episodes=10):
     """Test how well the trained agent performs"""
     print(f"Running {episodes} episodes with trained AI...")
@@ -159,7 +178,6 @@ def test_trained_agent(model, env, episodes=10):
         episode_steps = 0
         
         while True:
-            # AI chooses action (no randomness)
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             episode_steps += 1
@@ -168,8 +186,7 @@ def test_trained_agent(model, env, episodes=10):
                 episode_score = info['score']
                 break
                 
-            # Prevent infinite episodes
-            if episode_steps > 2000:  # Higher limit for trained agent
+            if episode_steps > 2000:
                 episode_score = info['score']
                 break
         
@@ -188,7 +205,6 @@ def test_trained_agent(model, env, episodes=10):
     print(f"   Average Final Balance: {avg_reward:.1f}")
     print(f"   Best Score: {max(total_scores)}")
     
-    # Performance comparison
     if avg_score > 5:
         print("🏆 EXCELLENT! Your minimal AI learned to play Snake amazingly!")
     elif avg_score > 3:
@@ -197,57 +213,72 @@ def test_trained_agent(model, env, episodes=10):
         print("📈 GOOD! Your minimal AI is learning to play Snake!")
     else:
         print("🔄 Keep training - the AI needs more time to learn!")
-    
-    # Expected improvement with minimal features
-    print(f"\n🎯 MINIMAL FEATURE BENEFITS:")
-    print(f"   🚀 Training Speed: ~10x faster than full board")
-    print(f"   🧠 Network Size: Much smaller (15 inputs vs 777)")
-    print(f"   🎮 Performance: Should be much better with focused features")
+
 
 if __name__ == "__main__":
-    import sys
+    parser = argparse.ArgumentParser(
+        description="🐍 Minimal Snake AI Training Script",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python train_minimal_ai.py --arch 64 64 --steps 250000 --device cpu
+  python train_minimal_ai.py --arch 28 28 --steps 250000 --device cuda
+  python train_minimal_ai.py --arch 10 10 --steps 100000 --name tiny
+  python train_minimal_ai.py --arch 64 64 64 --steps 500000 --name deep
+
+Run multiple experiments in parallel:
+  python train_minimal_ai.py --arch 10 10 --steps 250000 --name arch_10x10 &
+  python train_minimal_ai.py --arch 28 28 --steps 250000 --name arch_28x28 &
+  python train_minimal_ai.py --arch 64 64 --steps 250000 --name arch_64x64 &
+        """
+    )
     
-    # Show help message first
-    if len(sys.argv) > 1 and sys.argv[1] in ['-h', '--help']:
-        print("🐍 Minimal Snake AI Training Script")
-        print("Usage: python train_minimal_ai.py [steps]")
-        print("")
-        print("Arguments:")
-        print("  steps    Number of training steps (default: 250,000)")
-        print("")
-        print("Examples:")
-        print("  python train_minimal_ai.py          # Default training")
-        print("  python train_minimal_ai.py 10000    # Quick test")
-        print("  python train_minimal_ai.py 100000   # Extended training")
-        print("  python train_minimal_ai.py 500000   # Long training")
-        print("")
-        print("Benefits of minimal environment:")
-        print("  🚀 10x faster training (15 features vs 777)")
-        print("  🧠 Smaller, more efficient neural networks")
-        print("  🎯 Focused on essential features only")
-        sys.exit(0)
+    parser.add_argument(
+        "--arch", 
+        type=int, 
+        nargs="+", 
+        default=[64, 64],
+        help="Network architecture as space-separated integers (default: 64 64)"
+    )
     
-    # Parse command line arguments
-    training_steps = 250000  # Default value
+    parser.add_argument(
+        "--steps", 
+        type=int, 
+        default=250000,
+        help="Number of training steps (default: 250000)"
+    )
     
-    if len(sys.argv) > 1:
-        try:
-            training_steps = int(sys.argv[1])
-            if training_steps <= 0:
-                raise ValueError("Training steps must be positive")
-        except ValueError as e:
-            print(f"❌ Error: Invalid training steps argument - {e}")
-            print("Usage: python train_minimal_ai.py [steps]")
-            print("Examples:")
-            print("  python train_minimal_ai.py          # Train for 250,000 steps (default)")
-            print("  python train_minimal_ai.py 10000    # Train for 10,000 steps")
-            print("  python train_minimal_ai.py 100000   # Train for 100,000 steps")
-            sys.exit(1)
+    parser.add_argument(
+        "--device", 
+        type=str, 
+        choices=["cpu", "cuda"],
+        default="cpu",
+        help="Device to train on: cpu or cuda (default: cpu)"
+    )
     
-    # Create directories for saving models and logs
+    parser.add_argument(
+        "--name", 
+        type=str, 
+        default=None,
+        help="Model name for saving (default: minimal_<arch>)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Generate model name from architecture if not provided
+    if args.name is None:
+        arch_str = "x".join(map(str, args.arch))
+        args.name = f"minimal_{arch_str}"
+    
+    # Create directories
     os.makedirs("models", exist_ok=True)
-    os.makedirs("logs_minimal", exist_ok=True)
-    os.makedirs("logs_minimal/eval", exist_ok=True)
-    os.makedirs("tensorboard_logs_minimal", exist_ok=True)
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("logs/tensorboard", exist_ok=True)
     
-    main(training_steps)
+    # Run training
+    main(
+        training_steps=args.steps,
+        arch=args.arch,
+        device=args.device,
+        model_name=args.name
+    )

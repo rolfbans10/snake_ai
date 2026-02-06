@@ -19,20 +19,25 @@ A deep reinforcement learning project that trains an AI agent to play the classi
 
 ```
 snake_ai/
-├── snake_game.py              # Base Snake game with Pygame rendering
-├── snake_env.py               # Advanced environment (curriculum learning)
-├── snake_env_simple.py        # Simple environment (777-dim observations)
+├── snake_game.py               # Base Snake game with Pygame rendering
+├── snake_env.py                # Advanced environment (curriculum learning)
+├── snake_env_simple.py         # Simple environment (777-dim observations)
 ├── snake_env_simple_minimal.py # Minimal environment (20-dim observations)
-├── train_ai.py                # Training script for advanced environment
-├── train_simple_ai.py         # Training script for simple environment
-├── train_minimal_ai.py        # Training script for minimal environment
-├── watch_ai_play.py           # Visualize trained AI (advanced)
-├── watch_simple_ai.py         # Visualize trained AI (simple)
-├── watch_minimal_ai.py        # Visualize trained AI (minimal)
-├── models/                    # Saved trained models
-│   └── simple_snake_ai.zip    # Pre-trained model
-├── requirements.txt           # Python dependencies
-└── test_*.py                  # Various test scripts
+├── train_ai.py                 # Training script for advanced environment
+├── train_simple_ai.py          # Training script for simple environment
+├── train_minimal_ai.py         # Training script for minimal environment (configurable)
+├── train_multiple_minimal_ai.py # Run multiple experiments in parallel
+├── watch_ai_play.py            # Visualize trained AI (advanced)
+├── watch_simple_ai.py          # Visualize trained AI (simple)
+├── watch_minimal_ai.py         # Visualize trained AI (minimal, with model selection)
+├── models/                     # Saved trained models
+│   └── *.zip                   # Trained model files
+├── logs/                       # Training logs (gitignored)
+│   ├── simple/                 # Simple environment logs
+│   ├── minimal_*/              # Minimal environment logs per experiment
+│   └── tensorboard/            # TensorBoard logs for all experiments
+├── requirements.txt            # Python dependencies
+└── test_*.py                   # Various test scripts
 ```
 
 ## Installation
@@ -164,12 +169,14 @@ python train_ai.py
 
 ### TensorBoard
 
-Training logs are saved to `tensorboard_logs_*` directories. View them with:
+Training logs are saved to the `logs/tensorboard/` directory. View them with:
 
 ```bash
-tensorboard --logdir tensorboard_logs_minimal/
-# or
-tensorboard --logdir tensorboard_logs_simple/
+# View all experiments
+tensorboard --logdir logs/tensorboard/
+
+# View specific experiment
+tensorboard --logdir logs/tensorboard/minimal_64x64/
 ```
 
 Then open http://localhost:6006 in your browser.
