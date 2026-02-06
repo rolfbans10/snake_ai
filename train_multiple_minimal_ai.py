@@ -130,47 +130,48 @@ def run_experiment(experiment: Experiment, live_output: bool = False, log_dir: s
                 text=True
             )
             print("-" * 50)
-            stdout, stderr = "", ""
+            returncode = result.returncode
         else:
-            # Capture output and write to log file (for parallel mode)
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=os.path.dirname(os.path.abspath(__file__)) or "."
-            )
-            stdout, stderr = result.stdout, result.stderr
-            
-            # Write output to log file
-            with open(log_file, "w") as f:
+            # Stream output directly to log file in REAL-TIME (for parallel mode)
+            with open(log_file, "w", buffering=1) as f:  # Line buffering
                 f.write(f"=== Experiment: {experiment.name} ===\n")
                 f.write(f"Command: {' '.join(cmd)}\n")
                 f.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write("=" * 50 + "\n\n")
-                f.write("=== STDOUT ===\n")
-                f.write(stdout or "(empty)\n")
-                f.write("\n=== STDERR ===\n")
-                f.write(stderr or "(empty)\n")
+                f.flush()
+                
+                # Run process with stdout/stderr going directly to file
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,  # Merge stderr into stdout
+                    text=True,
+                    cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
+                    bufsize=1  # Line buffering
+                )
+                
+                # Wait for process to complete
+                returncode = process.wait()
+                
+                f.write("\n" + "=" * 50 + "\n")
+                f.write(f"Finished: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Exit code: {returncode}\n")
             
             print(f"   📝 Log: {log_file}")
         
         elapsed = time.time() - start_time
-        success = result.returncode == 0
+        success = returncode == 0
         
         if success:
             print(f"✅ Completed: {experiment.name} ({elapsed/60:.1f} min)")
         else:
-            print(f"❌ Failed: {experiment.name}")
-            if stderr:
-                print(f"   Error: {stderr[:500]}")
+            print(f"❌ Failed: {experiment.name} (exit code: {returncode})")
         
         return {
             "name": experiment.name,
             "success": success,
             "elapsed_seconds": elapsed,
-            "returncode": result.returncode,
-            "stdout": stdout,
-            "stderr": stderr,
+            "returncode": returncode,
             "log_file": log_file
         }
         
